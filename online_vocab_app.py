@@ -94,12 +94,26 @@ st.markdown("""
 # 4. 資料庫與雲端同步功能
 # =================================================================
 
-def load_data_from_cloud(uid):
-    """從 Firestore 讀取使用者學習進度"""
-    if db is None: return {}
+def load_user_data(uid):
+    """讀取使用者的完整資料 (包含 API Key 和 學習進度)"""
+    if db is None: return {}, None  # 回傳 (data, api_key)
+
     doc_ref = db.collection("users").document(uid)
     doc = doc_ref.get()
-    return doc.to_dict().get("learning_data", {}) if doc.exists else {}
+
+    if doc.exists:
+        user_doc = doc.to_dict()
+        # 回傳 learning_data 和 api_key
+        return user_doc.get("learning_data", {}), user_doc.get("api_key", None)
+    else:
+        return {}, None
+
+def save_api_key(uid, api_key):
+    """單獨儲存 API Key 到資料庫"""
+    if db is None: return
+    doc_ref = db.collection("users").document(uid)
+    # merge=True 確保不會把原本的學習紀錄蓋掉
+    doc_ref.set({"api_key": api_key}, merge=True)
 
 def load_local_json(filepath):
     """讀取本地靜態單字庫檔案"""
@@ -185,7 +199,13 @@ if not st.session_state.user_info:
 # 初始化 Session State
 if "learning_data" not in st.session_state:
     uid = st.session_state.user_info['uid']
-    st.session_state.learning_data = load_data_from_cloud(uid)
+    # 同時載入進度與 Key
+    data, saved_key = load_user_data(uid)
+    st.session_state.learning_data = data
+
+    # 如果資料庫有 Key，就存入 session
+    if saved_key:
+        st.session_state.gemini_key = saved_key
 
 if "full_word_list" not in st.session_state:
     data = load_local_json(FULL_WORD_FILE)
@@ -288,13 +308,41 @@ def update_srs(word, is_known):
 
 with st.sidebar:
     st.write(f"👤 Hi, {st.session_state.user_info['email']}")
-    if st.button("🚪 登出"):
-        st.session_state.user_info = None
-        st.rerun()
+
+    # --- API Key 自動化管理區 ---
     st.divider()
-    st.title("⚙️ 設定")
-    api_key = st.text_input("Gemini API Key", type="password")
-    if api_key: genai.configure(api_key=api_key)
+    st.subheader("🔑 API Key 設定")
+
+    # 檢查 Session 裡有沒有 Key
+    if "gemini_key" in st.session_state:
+        st.success("✅ 已載入您的雲端 API Key")
+
+        # 讓它生效
+        genai.configure(api_key=st.session_state.gemini_key)
+
+        # 提供一個按鈕讓使用者清除 (更換 Key)
+        if st.button("🗑️ 刪除/更換 Key"):
+            del st.session_state.gemini_key
+            # 同時去資料庫把 Key 刪掉 (設為 null 或 delete field)
+            save_api_key(st.session_state.user_info['uid'], firestore.DELETE_FIELD)
+            st.rerun()
+
+    else:
+        st.info("這是您第一次使用，請輸入一次 Key，系統會幫您存到雲端。")
+        input_key = st.text_input("Gemini API Key", type="password")
+
+        if st.button("💾 儲存 Key"):
+            if input_key:
+                # 1. 設定到 Session
+                st.session_state.gemini_key = input_key
+                # 2. 存到 Firebase
+                save_api_key(st.session_state.user_info['uid'], input_key)
+                # 3. 設定 GenAI
+                genai.configure(api_key=input_key)
+                st.success("已儲存！下次登入不用再輸入了。")
+                time.sleep(1)
+                st.rerun()
+
     st.divider()
     st.subheader("🤖 故事風格")
     main_theme = st.selectbox("主題", list(THEME_DATA.keys()))
@@ -364,8 +412,9 @@ elif st.session_state.stage == "story":
     st.markdown("<h2 style='text-align: center; color: #BB86FC;'>🎉 練習完成！</h2>", unsafe_allow_html=True)
     st.info(f"本次弱點單字: {', '.join(st.session_state.unknown_words) if st.session_state.unknown_words else '無'}")
     if st.button("🪄 生成 AI 情境故事", use_container_width=True):
-        if not api_key:
-            st.error("請先在左側設定 API Key")
+        # 改成檢查 session_state 裡有沒有 key
+        if "gemini_key" not in st.session_state:
+            st.error("請先在左側儲存您的 Gemini API Key")
         else:
             prompt = f"""
                         你是一位專業英文老師。請用英文寫一個關於「{main_theme} - {sub_theme}」的故事（約 120-150 字）。
