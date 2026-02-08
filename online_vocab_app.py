@@ -247,12 +247,23 @@ def smart_sampling():
     st.session_state.session_queue = selected
     st.session_state.unknown_words = []
 
+
 def update_srs(word, is_known):
     """更新單字的間隔重複 (SRS) 數據"""
+    # 1. 如果是全新的字，完全沒紀錄，先初始化一個完整的字典
     if word not in st.session_state.learning_data:
         st.session_state.learning_data[word] = {"mastery": 0, "seen": 0, "interval": 0}
+
     data = st.session_state.learning_data[word]
+
+    # 2. 【關鍵修復】防呆機制：如果紀錄存在，但欄位有缺，自動補 0
+    if "seen" not in data: data["seen"] = 0
+    if "mastery" not in data: data["mastery"] = 0
+    if "interval" not in data: data["interval"] = 0
+
     now = datetime.now()
+
+    # 3. 更新數據邏輯
     if is_known:
         data["mastery"] += 1
         days = 2 ** data["mastery"]
@@ -264,7 +275,10 @@ def update_srs(word, is_known):
         data["next_review"] = now.isoformat()
         if word not in st.session_state.unknown_words:
             st.session_state.unknown_words.append(word)
+
     data["seen"] += 1
+
+    # 4. 存檔
     if st.session_state.user_info:
         save_data_to_cloud(st.session_state.user_info['uid'], st.session_state.learning_data)
 
