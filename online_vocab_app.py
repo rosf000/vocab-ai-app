@@ -164,7 +164,6 @@ def login_ui():
 
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        st.markdown('<div class="login-container">', unsafe_allow_html=True)
 
         # 使用 Tabs 取代 Radio，視覺更簡潔
         tab1, tab2 = st.tabs(["登入", "註冊新帳號"])
@@ -459,3 +458,4 @@ elif st.session_state.stage == "story":
     if st.button("🏠 回首頁"):
         st.session_state.stage = "setup"
         st.rerun()
+
