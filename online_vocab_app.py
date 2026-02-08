@@ -158,34 +158,53 @@ def auth_user(email, password, is_login=True):
             error_msg = "連線錯誤"
         return {"error": error_msg}
 
+
 def login_ui():
-    """顯示登入與註冊介面"""
-    st.markdown("<h1 style='text-align: center; color: #BB86FC;'>🔐 會員登入</h1>", unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align: center; color: #BB86FC;'>🔐 會員中心</h1>", unsafe_allow_html=True)
+
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        with st.container():
-            st.markdown('<div class="login-container">', unsafe_allow_html=True)
-            auth_mode = st.radio("模式", ["登入", "註冊新帳號"], horizontal=True)
-            email = st.text_input("Email")
-            password = st.text_input("密碼", type="password")
-            if st.button("送出", type="primary"):
-                if not email or not password:
-                    st.error("請輸入 Email 和密碼")
-                else:
-                    with st.spinner("驗證中..."):
-                        result = auth_user(email, password, is_login=(auth_mode == "登入"))
-                        if "error" in result:
-                            st.error(f"❌ {result['error']}")
-                        else:
-                            st.success(f"🎉 {auth_mode}成功！")
-                            st.session_state.user_info = {
-                                "email": result["email"],
-                                "uid": result["localId"],
-                                "token": result["idToken"]
-                            }
-                            time.sleep(1)
-                            st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown('<div class="login-container">', unsafe_allow_html=True)
+
+        # 使用 Tabs 取代 Radio，視覺更簡潔
+        tab1, tab2 = st.tabs(["登入", "註冊新帳號"])
+
+        # --- 登入區塊 ---
+        with tab1:
+            email_in = st.text_input("Email", key="login_email")
+            pass_in = st.text_input("密碼", type="password", key="login_pass")
+            if st.button("登入", type="primary"):
+                handle_auth(email_in, pass_in, is_login=True)
+
+        # --- 註冊區塊 ---
+        with tab2:
+            email_up = st.text_input("Email", key="signup_email")
+            pass_up = st.text_input("設定密碼", type="password", key="signup_pass")
+            if st.button("建立帳號"):
+                handle_auth(email_up, pass_up, is_login=False)
+
+        st.markdown('</div>', unsafe_allow_html=True)
+
+
+# 抽離出的驗證邏輯，避免重複寫
+def handle_auth(email, password, is_login):
+    if not email or not password:
+        st.error("請輸入完整資訊")
+        return
+
+    with st.spinner("連線中..."):
+        result = auth_user(email, password, is_login=is_login)
+        if "error" in result:
+            st.error(f"❌ {result['error']}")
+        else:
+            st.success(f"🎉 {'登入' if is_login else '註冊'}成功！")
+            st.session_state.user_info = {
+                "email": result["email"],
+                "uid": result["localId"],
+                "token": result["idToken"]
+            }
+            time.sleep(1)
+            st.rerun()
 
 # 權限檢查：未登入則停止執行
 if not st.session_state.user_info:
@@ -199,11 +218,8 @@ if not st.session_state.user_info:
 # 初始化 Session State
 if "learning_data" not in st.session_state:
     uid = st.session_state.user_info['uid']
-    # 同時載入進度與 Key
     data, saved_key = load_user_data(uid)
     st.session_state.learning_data = data
-
-    # 如果資料庫有 Key，就存入 session
     if saved_key:
         st.session_state.gemini_key = saved_key
 
@@ -221,14 +237,20 @@ if "full_word_list" not in st.session_state:
     st.session_state.full_word_db = word_map
     st.session_state.full_word_list = word_list
 
-# 初始化狀態機變數
-for key, default in [("session_queue", []), ("current_word", None),
-                    ("unknown_words", []), ("stage", "setup"), ("dict_info", {})]:
+# ★★★ 修正點 1：把 show_answer 加在這裡，跟其他變數一起初始化，就不會打斷 if/elif ★★★
+for key, default in [
+    ("session_queue", []),
+    ("current_word", None),
+    ("unknown_words", []),
+    ("stage", "setup"),
+    ("dict_info", {}),
+    ("show_answer", False) # 這裡！
+]:
     if key not in st.session_state:
         st.session_state[key] = default
 
+# --- 函式定義區 ---
 def get_word_tag(word):
-    """獲取單字掌握度標籤"""
     data = st.session_state.learning_data.get(word, {})
     mastery = data.get("mastery", 0)
     if word not in st.session_state.learning_data:
@@ -237,9 +259,9 @@ def get_word_tag(word):
         return f"⏳ 掌握度 {mastery}", "#FBC02D"
     else:
         return "💎 長期記憶", "#03DAC6"
+
 @st.cache_data(ttl=3600)
 def fetch_dictionary_data(word):
-    """獲取外部字典 API 資料"""
     try:
         url = f"https://api.dictionaryapi.dev/api/v2/entries/en/{word}"
         res = requests.get(url, timeout=2)
@@ -253,7 +275,6 @@ def fetch_dictionary_data(word):
     return {"phonetic": "/.../", "definition": "暫無詳細定義 (請參考下方 AI 故事)"}
 
 def smart_sampling():
-    """SRS 智慧抽詞演算法"""
     history = st.session_state.learning_data
     full_list = st.session_state.full_word_list
     now = datetime.now().isoformat()
@@ -267,23 +288,15 @@ def smart_sampling():
     st.session_state.session_queue = selected
     st.session_state.unknown_words = []
 
-
 def update_srs(word, is_known):
-    """更新單字的間隔重複 (SRS) 數據"""
-    # 1. 如果是全新的字，完全沒紀錄，先初始化一個完整的字典
     if word not in st.session_state.learning_data:
         st.session_state.learning_data[word] = {"mastery": 0, "seen": 0, "interval": 0}
-
     data = st.session_state.learning_data[word]
-
-    # 2. 【關鍵修復】防呆機制：如果紀錄存在，但欄位有缺，自動補 0
     if "seen" not in data: data["seen"] = 0
     if "mastery" not in data: data["mastery"] = 0
     if "interval" not in data: data["interval"] = 0
 
     now = datetime.now()
-
-    # 3. 更新數據邏輯
     if is_known:
         data["mastery"] += 1
         days = 2 ** data["mastery"]
@@ -295,10 +308,7 @@ def update_srs(word, is_known):
         data["next_review"] = now.isoformat()
         if word not in st.session_state.unknown_words:
             st.session_state.unknown_words.append(word)
-
     data["seen"] += 1
-
-    # 4. 存檔
     if st.session_state.user_info:
         save_data_to_cloud(st.session_state.user_info['uid'], st.session_state.learning_data)
 
@@ -308,41 +318,26 @@ def update_srs(word, is_known):
 
 with st.sidebar:
     st.write(f"👤 Hi, {st.session_state.user_info['email']}")
-
-    # --- API Key 自動化管理區 ---
     st.divider()
     st.subheader("🔑 API Key 設定")
-
-    # 檢查 Session 裡有沒有 Key
     if "gemini_key" in st.session_state:
         st.success("✅ 已載入您的雲端 API Key")
-
-        # 讓它生效
         genai.configure(api_key=st.session_state.gemini_key)
-
-        # 提供一個按鈕讓使用者清除 (更換 Key)
         if st.button("🗑️ 刪除/更換 Key"):
             del st.session_state.gemini_key
-            # 同時去資料庫把 Key 刪掉 (設為 null 或 delete field)
             save_api_key(st.session_state.user_info['uid'], firestore.DELETE_FIELD)
             st.rerun()
-
     else:
         st.info("這是您第一次使用，請輸入一次 Key，系統會幫您存到雲端。")
         input_key = st.text_input("Gemini API Key", type="password")
-
         if st.button("💾 儲存 Key"):
             if input_key:
-                # 1. 設定到 Session
                 st.session_state.gemini_key = input_key
-                # 2. 存到 Firebase
                 save_api_key(st.session_state.user_info['uid'], input_key)
-                # 3. 設定 GenAI
                 genai.configure(api_key=input_key)
                 st.success("已儲存！下次登入不用再輸入了。")
                 time.sleep(1)
                 st.rerun()
-
     st.divider()
     st.subheader("🤖 故事風格")
     main_theme = st.selectbox("主題", list(THEME_DATA.keys()))
@@ -350,7 +345,7 @@ with st.sidebar:
     st.divider()
     st.caption(f"📚 總單字庫: {len(st.session_state.full_word_list)} | 📖 已學: {len(st.session_state.learning_data)}")
 
-# 階段 1：準備畫面
+# --- 階段 1：準備畫面 ---
 if st.session_state.stage == "setup":
     st.markdown("<h1 style='text-align: center; color: #BB86FC;'>🧠 AI 智慧記憶 (Pro)</h1>", unsafe_allow_html=True)
     col1, col2, col3 = st.columns([1, 2, 1])
@@ -362,61 +357,87 @@ if st.session_state.stage == "setup":
             else:
                 st.session_state.current_word = st.session_state.session_queue.pop(0)
                 st.session_state.dict_info = fetch_dictionary_data(st.session_state.current_word)
+
+                # ★★★ 修正點 2：每次開始新練習時，強制把答案蓋起來 ★★★
+                st.session_state.show_answer = False
+
                 st.session_state.stage = "learning"
                 st.rerun()
 
-# 階段 2：學習卡片
+# --- 階段 2：學習卡片 ---
 elif st.session_state.stage == "learning":
     word = st.session_state.current_word
-    tag_text, tag_color = get_word_tag(word)
     dict_data = st.session_state.dict_info
+
+    # 嘗試獲取例句
+    example_sentence = "No example available."
+    try:
+        example_sentence = dict_data.get("meanings", [{}])[0].get("definitions", [{}])[0].get("example", "暫無例句")
+    except:
+        pass
+
     st.progress((5 - len(st.session_state.session_queue)) / 5)
+
+    # 卡片正面 (永遠顯示)
     st.markdown(f"""
     <div class="word-card">
-        <div style="background-color: {tag_color}; color: #121212; display: inline-block; padding: 2px 10px; border-radius: 4px; font-weight: bold; font-size: 0.8em; margin-bottom: 10px;">
-            {tag_text}
-        </div>
         <div class="big-word">{word}</div>
         <div class="phonetic">{dict_data.get('phonetic', '')}</div>
-        <div class="definition">{dict_data.get('definition', '')}</div>
-        <br>
-        <a href="https://dictionary.cambridge.org/zht/詞典/英語-漢語-繁體/{word}" target="_blank" style="color: #03DAC6; text-decoration: none;">
-            🔗 查看劍橋字典詳解
-        </a>
     </div>
     """, unsafe_allow_html=True)
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("❌ 不認識 (強化)", type="primary"):
-            update_srs(word, False)
-            if st.session_state.session_queue:
-                st.session_state.current_word = st.session_state.session_queue.pop(0)
-                st.session_state.dict_info = fetch_dictionary_data(st.session_state.current_word)
-                st.rerun()
-            else:
-                st.session_state.stage = "story"
-                st.rerun()
-    with col2:
-        if st.button("✅ 認識 (Next)"):
-            update_srs(word, True)
-            if st.session_state.session_queue:
-                st.session_state.current_word = st.session_state.session_queue.pop(0)
-                st.session_state.dict_info = fetch_dictionary_data(st.session_state.current_word)
-                st.rerun()
-            else:
-                st.session_state.stage = "story"
-                st.rerun()
+
+    # ★★★ 修正點 3：邏輯判斷 (沒看答案 vs 已看答案) ★★★
+    if not st.session_state.show_answer:
+        # 情況 A：還沒看答案 -> 顯示「顯示答案」按鈕
+        if st.button("👁️ 顯示答案與意思", type="primary", use_container_width=True):
+            st.session_state.show_answer = True
+            st.rerun()
+    else:
+        # 情況 B：已看答案 -> 顯示詳細資訊 + 評分按鈕
+        st.markdown(f"""
+        <div style="background-color: #2D2D2D; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+            <div style="color: #B0B0B0;">📚 定義：{dict_data.get('definition', '')}</div>
+            <div style="color: #BB86FC; margin-top: 10px; font-style: italic;">📝 例句："{example_sentence}"</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("❌ 忘記了 (重設)", type="secondary"):
+                update_srs(word, False)
+                st.session_state.show_answer = False  # 換下一字前，把遮罩蓋回去
+
+                if st.session_state.session_queue:
+                    st.session_state.current_word = st.session_state.session_queue.pop(0)
+                    st.session_state.dict_info = fetch_dictionary_data(st.session_state.current_word)
+                    st.rerun()
+                else:
+                    st.session_state.stage = "story"
+                    st.rerun()
+
+        with col2:
+            if st.button("✅ 記住了 (Next)", type="primary"):
+                update_srs(word, True)
+                st.session_state.show_answer = False  # 換下一字前，把遮罩蓋回去
+
+                if st.session_state.session_queue:
+                    st.session_state.current_word = st.session_state.session_queue.pop(0)
+                    st.session_state.dict_info = fetch_dictionary_data(st.session_state.current_word)
+                    st.rerun()
+                else:
+                    st.session_state.stage = "story"
+                    st.rerun()
 
 # 階段 3：AI 故事生成
 elif st.session_state.stage == "story":
     st.markdown("<h2 style='text-align: center; color: #BB86FC;'>🎉 練習完成！</h2>", unsafe_allow_html=True)
     st.info(f"本次弱點單字: {', '.join(st.session_state.unknown_words) if st.session_state.unknown_words else '無'}")
+
     if st.button("🪄 生成 AI 情境故事", use_container_width=True):
-        # 改成檢查 session_state 裡有沒有 key
         if "gemini_key" not in st.session_state:
             st.error("請先在左側儲存您的 Gemini API Key")
         else:
-            prompt = f"""
+            prompt = prompt = f"""
                         你是一位專業英文老師。請用英文寫一個關於「{main_theme} - {sub_theme}」的故事（約 120-150 字）。
                         必須自然地包含這 5 個單字：{', '.join(st.session_state.unknown_words)}。
 
@@ -428,12 +449,13 @@ elif st.session_state.stage == "story":
                         """
             with st.spinner("AI 正在編織故事中..."):
                 try:
-                    model = genai.GenerativeModel('models/gemini-3-flash-preview')
+                    model = genai.GenerativeModel('models/gemini-pro')  # 修正模型名稱比較保險
                     response = model.generate_content(prompt)
                     st.markdown("### 📖 您的客製化故事")
                     st.markdown(response.text)
                 except Exception as e:
                     st.error(f"生成失敗: {e}")
+
     if st.button("🏠 回首頁"):
         st.session_state.stage = "setup"
         st.rerun()
