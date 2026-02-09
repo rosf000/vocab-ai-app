@@ -57,7 +57,7 @@ class Config:
         2. JSON 格式如下：
         {{
             "phonetic": "KK音標",
-            "definition": "繁體中文簡潔定義(15字內)",
+            "definition": "英文簡潔定義(繁體中文翻譯)",
             "example": "英文例句 (繁體中文翻譯)"
         }}
         """,
