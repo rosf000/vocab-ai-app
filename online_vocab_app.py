@@ -426,8 +426,8 @@ class UIManager:
             AIService.play_audio(word)
             st.markdown(f"""
             <div style="background-color: #2D2D2D; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
-                <div style="color: #B0B0B0;">📚 定義：{dict_data.get('definition', '')}</div>
-                <div style="color: #BB86FC; margin-top: 10px; font-style: italic;">📝 例句："{dict_data.get('example', '')}"</div>
+                <div style="color: #B0B0B0;">📚 Definition：{dict_data.get('definition', '')}</div>
+                <div style="color: #BB86FC; margin-top: 10px; font-style: italic;">📝 Example："{dict_data.get('example', '')}"</div>
             </div>
             """, unsafe_allow_html=True)
 
