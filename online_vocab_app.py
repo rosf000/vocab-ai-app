@@ -191,7 +191,7 @@ class AIService:
         with st.spinner("AI 正在動腦筋想梗..."):
             try:
                 genai.configure(api_key=st.session_state.gemini_key)
-                model = genai.GenerativeModel('models/gemini-pro')
+                model = genai.GenerativeModel('models/gemini-3-flash-preview')
 
                 prompt = f"""
                 你是一位專業英文老師。請用英文寫一個關於「{main_theme} - {sub_theme}」的故事（約 120-150 字）。
