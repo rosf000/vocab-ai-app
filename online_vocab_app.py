@@ -18,7 +18,7 @@ import io
 class Config:
     HISTORY_FILE = "vocab_history.json"
     FULL_WORD_FILE = "full-word.json"
-
+    model = genai.GenerativeModel('models/gemini-3-flash-preview')
     THEME_DATA = {
         "職場生活": ["辦公室趣事", "職涯規劃", "人際互動"],
         "科幻冒險": ["外星探索", "未來科技", "平行世界"],
@@ -150,7 +150,7 @@ class AIService:
         with st.spinner("AI 正在動腦筋想梗..."):
             try:
                 genai.configure(api_key=st.session_state.gemini_key)
-                model = genai.GenerativeModel('models/gemini-3-flash-preview')
+                
                 prompt = f"""
                                         你是一位專業英文老師。請用英文寫一個關於「{main_theme} - {sub_theme}」的故事（約 120-150 字）。
                                         必須自然地包含這 5 個單字：{', '.join(st.session_state.unknown_words)}。
@@ -185,7 +185,7 @@ class AIService:
         with st.spinner("AI 正在編織故事中..."):
             try:
                 genai.configure(api_key=st.session_state.gemini_key)
-                model = genai.GenerativeModel('models/gemini-pro')
+                
                 response = model.generate_content(prompt)
                 st.markdown("### 📖 您的客製化故事")
                 st.markdown(response.text)
@@ -491,3 +491,4 @@ def load_local_json(filepath):
 if __name__ == "__main__":
     app = VocabularyApp()
     app.run()
+
