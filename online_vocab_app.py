@@ -18,7 +18,7 @@ import io
 class Config:
     HISTORY_FILE = "vocab_history.json"
     FULL_WORD_FILE = "full-word.json"
-    model = genai.GenerativeModel('models/gemini-3-flash-preview')
+
     THEME_DATA = {
         "職場生活": ["辦公室趣事", "職涯規劃", "人際互動"],
         "科幻冒險": ["外星探索", "未來科技", "平行世界"],
@@ -114,22 +114,74 @@ class FirebaseService:
 
 
 class AIService:
+
     @staticmethod
-    @st.cache_data(ttl=3600)
-    def fetch_dictionary(word):
+    def _get_model():
+        """
+        私有方法：負責檢查 API Key 並回傳設定好的 Gemini Model 物件。
+        如果沒有 Key，回傳 None。
+        """
+        api_key = st.session_state.get("gemini_key")
+        if not api_key:
+            return None
+
         try:
-            url = f"https://api.dictionaryapi.dev/api/v2/entries/en/{word}"
-            res = requests.get(url, timeout=2)
-            if res.status_code == 200:
-                data = res.json()[0]
-                return {
-                    "phonetic": data.get("phonetic", ""),
-                    "definition": data["meanings"][0]["definitions"][0]["definition"],
-                    "example": data["meanings"][0]["definitions"][0].get("example", "暫無例句")
-                }
-        except:
-            pass
-        return {"phonetic": "/.../", "definition": "暫無詳細定義", "example": "暫無例句"}
+            genai.configure(api_key=api_key)
+            # 這裡統一設定模型版本，未來要換模型只要改這裡
+            return genai.GenerativeModel('models/gemini-3-flash-preview')
+        except Exception as e:
+            st.error(f"模型初始化失敗: {e}")
+            return None
+
+    @staticmethod
+    def fetch_dictionary(word):
+        """
+        改用 Gemini 生成中文定義與例句
+        """
+        # 如果沒有 API Key，回傳預設值以免報錯
+        if "gemini_key" not in st.session_state or not st.session_state.gemini_key:
+            return {
+                "phonetic": "/.../",
+                "definition": "請先設定 API Key 以取得 AI 解釋",
+                "example": "Please set API Key first."
+            }
+
+        try:
+            genai.configure(api_key=st.session_state.gemini_key)
+            model = AIService._get_model()
+
+            # 提示詞：強制要求 JSON 格式以便程式解析
+            prompt = f"""
+            請作為一個英文教學字典，針對單字 "{word}" 提供以下資訊，並嚴格依照 JSON 格式回傳，不要有 markdown 標記：
+            {{
+                "phonetic": "KK音標",
+                "definition": "繁體中文的簡潔定義 (約15字內)",
+                "example": "一個實用的英文例句 (附上繁體中文翻譯)"
+            }}
+            """
+
+            response = model.generate_content(prompt)
+            text = response.text.strip()
+
+            # 清理可能產生的 Markdown code block 符號
+            if text.startswith("```json"):
+                text = text[7:]
+            if text.startswith("```"):
+                text = text[3:]
+            if text.endswith("```"):
+                text = text[:-3]
+
+            data = json.loads(text)
+            return data
+
+        except Exception as e:
+            # 如果 AI 解析失敗，回傳錯誤訊息
+            print(f"Dictionary Error: {e}")
+            return {
+                "phonetic": "/.../",
+                "definition": "暫時無法取得解釋 (AI 連線錯誤)",
+                "example": "Connection Error"
+            }
 
     @staticmethod
     def play_audio(text):
@@ -147,22 +199,26 @@ class AIService:
             st.error("請先設定 API Key")
             return
 
+        # === 修正點 1: 從 Session State 取得主題設定 ===
+        # 如果使用者還沒選，預設為 "職場生活"
+        theme_config = st.session_state.get("theme_config", ("職場生活", "辦公室趣事"))
+        main_theme, sub_theme = theme_config
+
+        # 取得目前累積的弱點單字，如果沒有就用當前單字
+        target_words = st.session_state.unknown_words if st.session_state.unknown_words else [word]
+
         with st.spinner("AI 正在動腦筋想梗..."):
             try:
                 genai.configure(api_key=st.session_state.gemini_key)
-                
-                prompt = f"""
-                                        你是一位專業英文老師。請用英文寫一個關於「{main_theme} - {sub_theme}」的故事（約 120-150 字）。
-                                        必須自然地包含這 5 個單字：{', '.join(st.session_state.unknown_words)}。
+                model = AIService._get_model()
 
-                                        要求：
-                                        1. 將指定單字用 Markdown 粗體 (**word**) 標示。
-                                        2. 針對我不熟的字（ {', '.join(st.session_state.unknown_words)}），在語境中提供更多線索輔助理解。
-                                        3. 語意通順，劇情流暢
-                                        4. 附上全文繁體中文翻譯。
-                                        """
+                prompt = f"""
+                你是一位幽默的英文老師。請針對單字 "{word}"：
+                1. 提供一個好記的「諧音記憶法」或「聯想記憶法」(繁體中文)。
+                2. 結合主題「{main_theme} - {sub_theme}」寫一個簡短好笑的句子。
+                """
                 res = model.generate_content(prompt)
-                st.info(f"💡 **記憶小撇步**：\n{res.text}")
+                st.info(f"💡 **記憶小撇步**：\n\n{res.text}")
             except Exception as e:
                 st.error(f"AI 呼叫失敗: {e}")
 
@@ -174,18 +230,17 @@ class AIService:
 
         prompt = f"""
             你是一位專業英文老師。請用英文寫一個關於「{theme} - {sub_theme}」的故事（約 120-150 字）。
-            必須自然地包含這 5 個單字：{', '.join(words)}。
+            必須自然地包含這幾個單字：{', '.join(words)}。
 
             要求：
             1. 將指定單字用 Markdown 粗體 (**word**) 標示。
-            2. 針對我不熟的字，在語境中提供更多線索輔助理解。
-            3. 語意通順，劇情流暢
-            4. 附上全文繁體中文翻譯。
+            2. 語意通順，劇情流暢。
+            3. 在英文故事下方，附上「全文繁體中文翻譯」。
         """
         with st.spinner("AI 正在編織故事中..."):
             try:
                 genai.configure(api_key=st.session_state.gemini_key)
-                
+                model = AIService._get_model()
                 response = model.generate_content(prompt)
                 st.markdown("### 📖 您的客製化故事")
                 st.markdown(response.text)
@@ -491,4 +546,3 @@ def load_local_json(filepath):
 if __name__ == "__main__":
     app = VocabularyApp()
     app.run()
-
